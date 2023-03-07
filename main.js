@@ -3,14 +3,65 @@ const nodemailer = require("nodemailer");
 const Handlebars = require("handlebars");
 const fs = require("fs");
 
-async function listDatabases(client) {
-  databasesList = await client.db().admin().listDatabases();
+const baseAttachments = [
+  {
+    filename: "fb.png",
+    path: "assets/fb.png",
+    cid: "fb",
+  },
+  {
+    filename: "ig.png",
+    path: "assets/ig.png",
+    cid: "ig",
+  },
+  {
+    filename: "tw.png",
+    path: "assets/tw.png",
+    cid: "tw",
+  },
+  {
+    filename: "ssLogo.png",
+    path: "assets/ssLogo.png",
+    cid: "ssLogo",
+  },
+];
+const emailsTemplate = [
+  {
+    tag: "welcome",
+    subject: "Welcome!",
+    path: "welcome-email/index.html",
+    attachments: [
+      ...baseAttachments,
+      {
+        filename: "redMp.jpg",
+        path: "welcome-email/img/redMp.jpg",
+        cid: "redMp",
+      },
+    ],
+  },
+  {
+    tag: "social",
+    subject: "New 🔥",
+    path: "social-template/index.html",
+    attachments: [
+      ...baseAttachments,
+      {
+        filename: "mediaPost.jpg",
+        path: "social-template/img/mediaPost.jpg",
+        cid: "mediaPost",
+      },
+    ],
+  },
+];
 
-  console.log("Databases:");
-  databasesList.databases.forEach((db) => console.log(` - ${db.name}`));
+function pickTemplate(recievedArr) {
+  if (recievedArr.includes("welcome")) {
+    return emailsTemplate[1];
+  }
+  return emailsTemplate[0];
 }
 
-async function sendEmail(subject, recipiant, pathToEmailFile) {
+async function sendEmail(subject, recipiant, pathToEmailFile, attachments) {
   try {
     const source = fs.readFileSync(pathToEmailFile, "utf-8").toString();
     const template = Handlebars.compile(source);
@@ -28,43 +79,10 @@ async function sendEmail(subject, recipiant, pathToEmailFile) {
     });
 
     const mailOptions = {
-      from: "alanis.yates@thesneakerssociety.com",
-      to: "alanis.yates@thesneakerssociety.com",
+      to: recipiant,
       subject: subject,
-      //   text: "YOOOOOOO THIS WORKED",
       html: htmlToSend,
-      attachments: [
-        {
-          filename: "fb.png",
-          path: "/Users/alanisyates/Documents/dev/ss_scripts/emails-emailify-html-06-Mar-2023-161614/social-template/img/fb.png",
-          cid: "fb",
-        },
-        {
-          filename: "ig.png",
-          path: "/Users/alanisyates/Documents/dev/ss_scripts/emails-emailify-html-06-Mar-2023-161614/social-template/img/ig.png",
-          cid: "ig",
-        },
-        {
-          filename: "yt.png",
-          path: "/Users/alanisyates/Documents/dev/ss_scripts/emails-emailify-html-06-Mar-2023-161614/social-template/img/yt.png",
-          cid: "yt",
-        },
-        {
-          filename: "tw.png",
-          path: "/Users/alanisyates/Documents/dev/ss_scripts/emails-emailify-html-06-Mar-2023-161614/social-template/img/tw.png",
-          cid: "tw",
-        },
-        {
-          filename: "ssLogo.png",
-          path: "/Users/alanisyates/Documents/dev/ss_scripts/emails-emailify-html-06-Mar-2023-161614/social-template/img/ssLogo.png",
-          cid: "ssLogo",
-        },
-        {
-          filename: "redMp.jpg",
-          path: "emails-emailify-html-06-Mar-2023-164417/welcome-email/img/redMp.jpg",
-          cid: "redMp",
-        },
-      ],
+      attachments: attachments,
     };
 
     transporter.sendMail(mailOptions, function (error, info) {
@@ -79,13 +97,23 @@ async function sendEmail(subject, recipiant, pathToEmailFile) {
   }
 }
 
+async function updateRecieved(client, email, content) {
+  await client
+    .db("sneaker-society")
+    .collection("emails")
+    .updateOne({ email: email }, { $push: { recieved: content } });
+}
+
 async function logEmails(client) {
   const emails = await client
     .db("sneaker-society")
     .collection("emails")
     .find()
     .toArray();
-  const emailArr = emails.map((email) => email.email);
+
+  const emailArr = emails.map((email) => {
+    return { email: email.email, recieved: email.recieved };
+  });
 
   return emailArr;
 }
@@ -100,13 +128,19 @@ async function main() {
     await client.connect();
 
     const emails = await logEmails(client);
-
-    await sendEmail(
-      "this is a test",
-      "URGENT",
-      "/Users/alanisyates/Documents/dev/ss_scripts/emails-emailify-html-06-Mar-2023-164417/welcome-email/index.html"
-    );
     console.log(emails);
+
+    for (const [i, email] of emails.entries()) {
+      const template = pickTemplate(email.recieved);
+      await sendEmail(
+        template.subject,
+        email.email,
+        template.path,
+        template.attachments
+      );
+      await updateRecieved(client, email.email, template.tag);
+      // await updateRecieved(client, email.email, []);
+    }
   } catch (e) {
     console.error(e);
   } finally {
